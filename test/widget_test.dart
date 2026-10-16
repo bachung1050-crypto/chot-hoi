@@ -5,9 +5,12 @@ import 'package:chot_hoi/features/home/home_screen.dart';
 import 'package:chot_hoi/features/image_search/image_deal_screen.dart';
 import 'package:chot_hoi/features/product/product_detail_screen.dart';
 import 'package:chot_hoi/features/search/ai_search_screen.dart';
+import 'package:chot_hoi/mock/mock_data.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'helpers/mock_overrides.dart';
 
 const _screenSizes = <String, Size>{'360x800': Size(360, 800), '390x844': Size(390, 844), '412x915': Size(412, 915)};
 
@@ -18,12 +21,17 @@ Future<void> _pumpFor(WidgetTester tester, Duration duration) async {
   }
 }
 
-Future<void> _startApp(WidgetTester tester, Size size) async {
+Future<void> _startApp(WidgetTester tester, Size size, {bool signedIn = true}) async {
   tester.view
     ..physicalSize = size * 3
     ..devicePixelRatio = 3;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(const ProviderScope(child: ChotHoiApp()));
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: mockRepositoryOverrides(signedIn: signedIn),
+      child: const ChotHoiApp(),
+    ),
+  );
   await _pumpFor(tester, const Duration(seconds: 1));
 }
 
@@ -36,7 +44,177 @@ Finder _navLabel(String label) => find.descendant(of: find.byType(NavigationBar)
 
 Finder _horizontalCard(String name) => find.widgetWithText(ProductHorizontalCard, name);
 
+Future<void> _openProduct(WidgetTester tester, String name) async {
+  final card = _horizontalCard(name);
+  await tester.scrollUntilVisible(
+    card,
+    300,
+    scrollable: find.descendant(of: find.byType(HomeScreen), matching: find.byType(Scrollable)).first,
+  );
+  await tester.ensureVisible(card);
+  await tester.pump();
+  await tester.tap(card);
+  await _pumpFor(tester, const Duration(seconds: 2));
+}
+
 void main() {
+  testWidgets('signed out: user tabs ask to log in and actions prompt login', (tester) async {
+    await _startApp(tester, const Size(390, 844), signedIn: false);
+
+    await tester.tap(_navLabel('Đã lưu'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Đăng nhập để xem sản phẩm đã lưu'), findsOneWidget);
+
+    await tester.tap(_navLabel('Giỏ hời'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Đăng nhập để dùng Giỏ hời'), findsOneWidget);
+
+    await tester.tap(_navLabel('Cá nhân'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Bạn chưa đăng nhập'), findsOneWidget);
+
+    await tester.tap(find.text('Đăng nhập'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Chưa có tài khoản? Đăng ký'), findsOneWidget);
+    await tester.enterText(find.byType(TextFormField).at(0), MockData.profile.email);
+    await tester.enterText(find.byType(TextFormField).at(1), 'secret123');
+    await tester.tap(find.widgetWithText(FilledButton, 'Đăng nhập'));
+    await _pumpFor(tester, const Duration(seconds: 2));
+    expect(find.text('Nguyễn Văn A'), findsOneWidget);
+
+    await _finish(tester);
+  });
+
+  testWidgets('signed out: saving a product shows the login prompt', (tester) async {
+    await _startApp(tester, const Size(390, 844), signedIn: false);
+    await _openProduct(tester, 'Lenovo LOQ 15');
+
+    await tester.tap(find.text('Lưu'));
+    await _pumpFor(tester, const Duration(milliseconds: 500));
+    expect(find.text('Đăng nhập để sử dụng tính năng này'), findsOneWidget);
+    expect(find.text('Lưu'), findsOneWidget);
+
+    await _finish(tester);
+  });
+
+  testWidgets('product -> price alert sheet -> alerts screen -> toggle -> delete', (tester) async {
+    await _startApp(tester, const Size(390, 844));
+    await _openProduct(tester, 'Lenovo LOQ 15');
+
+    await tester.tap(find.byTooltip('Báo khi giảm giá'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Báo tôi khi giảm giá'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '19990000');
+    await tester.tap(find.text('Tạo cảnh báo'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.textContaining('Sẽ báo bạn khi giá ≤'), findsOneWidget);
+    await _pumpFor(tester, const Duration(seconds: 5));
+
+    await tester.tap(find.byTooltip('Quay lại'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    await tester.tap(_navLabel('Cá nhân'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    await tester.tap(find.text('Cảnh báo giá').last);
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Cảnh báo giá (6)'), findsOneWidget);
+
+    final tile = find.ancestor(of: find.text('Lenovo LOQ 15'), matching: find.byType(InkWell)).first;
+    final toggle = find.descendant(of: tile, matching: find.byType(Switch));
+    await tester.tap(toggle);
+    await _pumpFor(tester, const Duration(milliseconds: 500));
+    final paused = find.descendant(of: tile, matching: find.text('Đã tạm dừng theo dõi'));
+    expect(paused, findsOneWidget);
+    await tester.tap(toggle);
+    await _pumpFor(tester, const Duration(milliseconds: 500));
+    expect(paused, findsNothing);
+
+    await tester.tap(find.text('Lenovo LOQ 15'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    await tester.tap(find.text('Xóa cảnh báo'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Cảnh báo giá (5)'), findsOneWidget);
+
+    await _finish(tester);
+  });
+
+  testWidgets('search history chip searches again and history can be cleared', (tester) async {
+    await _startApp(tester, const Size(390, 844));
+    await tester.tap(_navLabel('Tìm kiếm'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+
+    final idle = find.descendant(of: find.byType(AiSearchScreen), matching: find.byType(Scrollable)).first;
+    await tester.scrollUntilVisible(find.text('Tìm kiếm gần đây'), 200, scrollable: idle);
+    await tester.scrollUntilVisible(find.text('Nhấn giữ một mục để xóa khỏi lịch sử'), 100, scrollable: idle);
+    await tester.ensureVisible(find.text('bàn phím cơ'));
+    await tester.pump();
+    await tester.tap(find.text('bàn phím cơ'));
+    await _pumpFor(tester, const Duration(seconds: 3));
+    expect(find.textContaining('Tìm thấy'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Quay lại'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    await tester.scrollUntilVisible(find.text('Xóa tất cả'), 200, scrollable: idle);
+    await tester.tap(find.text('Xóa tất cả'));
+    await _pumpFor(tester, const Duration(milliseconds: 500));
+    await tester.tap(find.text('Xóa hết'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Tìm kiếm gần đây'), findsNothing);
+
+    await _finish(tester);
+  });
+
+  testWidgets('notification tap marks it read and clears the badge with mark-all', (tester) async {
+    await _startApp(tester, const Size(390, 844));
+    await tester.tap(find.byTooltip('Thông báo'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+
+    expect(find.byTooltip('Đánh dấu tất cả đã đọc'), findsOneWidget);
+    await tester.tap(find.text('Deal hời hôm nay'));
+    await _pumpFor(tester, const Duration(milliseconds: 500));
+    await tester.tap(find.byTooltip('Đánh dấu tất cả đã đọc'));
+    await _pumpFor(tester, const Duration(milliseconds: 500));
+    expect(find.byTooltip('Đánh dấu tất cả đã đọc'), findsNothing);
+
+    await _finish(tester);
+  });
+
+  testWidgets('profile edit sheet updates the display name', (tester) async {
+    await _startApp(tester, const Size(390, 844));
+    await tester.tap(_navLabel('Cá nhân'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+
+    await tester.tap(find.byTooltip('Cài đặt'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Chỉnh sửa hồ sơ'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).first, 'Trần Thị B');
+    await tester.tap(find.text('English'));
+    await tester.tap(find.text('Lưu thay đổi'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(find.text('Đã cập nhật hồ sơ'), findsOneWidget);
+    expect(find.text('Trần Thị B'), findsOneWidget);
+
+    await _finish(tester);
+  });
+
+  testWidgets('login screen sends a password reset email', (tester) async {
+    await _startApp(tester, const Size(390, 844), signedIn: false);
+    await tester.tap(_navLabel('Cá nhân'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+    await tester.tap(find.text('Đăng nhập'));
+    await _pumpFor(tester, const Duration(seconds: 1));
+
+    await tester.tap(find.text('Quên mật khẩu?'));
+    await tester.pump();
+    expect(find.textContaining('Nhập email của bạn'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextFormField).first, 'demo@chothoi.vn');
+    await tester.tap(find.text('Quên mật khẩu?'));
+    await _pumpFor(tester, const Duration(milliseconds: 500));
+    expect(find.text('Đã gửi liên kết đặt lại mật khẩu tới demo@chothoi.vn'), findsOneWidget);
+
+    await _finish(tester);
+  });
+
   for (final entry in _screenSizes.entries) {
     group('screen ${entry.key}', () {
       testWidgets('home renders and bottom navigation reaches every tab', (tester) async {
@@ -94,13 +272,20 @@ void main() {
         await _pumpFor(tester, const Duration(seconds: 3));
 
         expect(find.textContaining('Tìm thấy'), findsOneWidget);
+        expect(find.textContaining('Chốt Hời AI'), findsWidgets);
 
-        final resultsList = find.descendant(of: find.byType(AiSearchScreen), matching: find.byType(Scrollable)).first;
-        await tester.scrollUntilVisible(find.text('Đề xuất tốt nhất'), 200, scrollable: resultsList);
+        // Vertical results ListView (not the horizontal filter chip scroller).
+        final resultsList = find
+            .descendant(
+              of: find.descendant(of: find.byType(AiSearchScreen), matching: find.byType(ListView)),
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        await tester.scrollUntilVisible(find.text('Đề xuất tốt nhất'), 300, scrollable: resultsList);
         expect(find.text('Dưới 25 triệu'), findsOneWidget);
 
         final asus = _horizontalCard('ASUS TUF Gaming A15');
-        await tester.scrollUntilVisible(asus, 200, scrollable: resultsList);
+        await tester.scrollUntilVisible(asus, 400, scrollable: resultsList);
         await tester.ensureVisible(asus);
         await tester.pump();
         await tester.tap(asus);
@@ -110,13 +295,13 @@ void main() {
         final detailList = find
             .descendant(of: find.byType(ProductDetailScreen), matching: find.byType(Scrollable))
             .first;
-        await tester.scrollUntilVisible(find.textContaining('Chốt Hời AI đánh giá'), 200, scrollable: detailList);
+        await tester.scrollUntilVisible(find.textContaining('Chốt Hời AI phân tích đánh giá'), 200, scrollable: detailList);
         await tester.scrollUntilVisible(find.text('So sánh giá giữa các sàn'), 200, scrollable: detailList);
         await tester.scrollUntilVisible(find.textContaining('Lịch sử giá'), 200, scrollable: detailList);
 
         await tester.tap(find.text('Thêm vào giỏ hời'));
         await _pumpFor(tester, const Duration(milliseconds: 500));
-        expect(find.text('Đã thêm vào Giỏ hời'), findsOneWidget);
+        expect(find.text('Đã thêm vào Giỏ hời (Shopee)'), findsOneWidget);
 
         await tester.tap(find.text('Xem giỏ'));
         await _pumpFor(tester, const Duration(seconds: 1));

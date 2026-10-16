@@ -1,5 +1,5 @@
+import '../../core/ai/ai_search_service.dart';
 import '../../core/config/app_config.dart';
-import '../../core/utils/search_query_parser.dart';
 import '../../core/utils/text_normalizer.dart';
 import '../../mock/mock_data.dart';
 import '../../models/category.dart';
@@ -8,9 +8,11 @@ import '../../models/search_result.dart';
 import '../product_repository.dart';
 
 class MockProductRepository implements ProductRepository {
-  MockProductRepository({this.latency = AppConfig.mockLatency});
+  MockProductRepository({this.latency = AppConfig.mockLatency, AiSearchService? aiSearch})
+    : _aiSearch = aiSearch ?? const FallbackAiSearchService();
 
   final Duration latency;
+  final AiSearchService _aiSearch;
 
   List<Product> get _products => MockProducts.all;
 
@@ -55,42 +57,59 @@ class MockProductRepository implements ProductRepository {
   Future<SearchResult> searchProducts(String query) async {
     await Future<void>.delayed(latency);
 
-    final normalized = TextNormalizer.normalize(query);
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      return const SearchResult(
+        intent: SearchIntent(query: '', keyword: ''),
+        products: [],
+      );
+    }
+
+    final normalized = TextNormalizer.normalize(trimmed);
     if (RegExp(r'\b(loi|error)\b').hasMatch(normalized)) {
       throw const SearchFailure('Không thể kết nối tới máy chủ tìm kiếm. Vui lòng thử lại.');
     }
 
-    final intent = SearchQueryParser.parse(
-      query,
-      categories: MockCategories.all,
-      brands: _products.map((p) => p.brand).toSet(),
-    );
-
-    final products = _match(intent, normalized)..sort((a, b) => _rank(a, b, intent));
+    final intent = await _aiSearch.parseSearchIntent(trimmed);
+    final products = _match(intent)..sort((a, b) => _rank(a, b, intent));
     return SearchResult(intent: intent, products: products);
   }
 
-  List<Product> _match(SearchIntent intent, String normalizedQuery) {
+  List<Product> _match(SearchIntent intent) {
+    var products = [..._products];
+
     final categoryId = intent.categoryId;
     if (categoryId != null) {
-      return _products.where((p) => p.categoryId == categoryId).toList();
+      products = products.where((p) => p.categoryId == categoryId).toList();
     }
     if (intent.brands.isNotEmpty) {
-      return _products.where((p) => intent.brands.contains(p.brand)).toList();
+      final byBrand = products.where((p) => intent.brands.contains(p.brand)).toList();
+      if (byBrand.isNotEmpty) products = byBrand;
+    }
+    if (intent.maxPrice != null) {
+      products = products.where((p) => p.currentPrice <= intent.maxPrice!).toList();
+    }
+    if (intent.minPrice != null) {
+      products = products.where((p) => p.currentPrice >= intent.minPrice!).toList();
     }
     if (intent.dealsOnly) {
-      return _products.where((p) => p.isGoodDeal).toList();
+      products = products.where((p) => p.isGoodDeal).toList();
     }
 
-    final tokens = normalizedQuery.split(RegExp(r'\s+')).where((t) => t.length > 1).toList();
-    if (tokens.isEmpty) return [..._products];
-    return _products.where((p) {
-      final haystack = TextNormalizer.normalize('${p.name} ${p.brand} ${MockCategories.byId(p.categoryId).name}');
-      return tokens.every(haystack.contains);
-    }).toList();
+    final keyword = intent.keyword?.trim();
+    if (keyword != null && keyword.isNotEmpty && categoryId == null && intent.brands.isEmpty) {
+      final tokens = TextNormalizer.normalize(keyword).split(RegExp(r'\s+')).where((t) => t.length > 1).toList();
+      if (tokens.isNotEmpty) {
+        products = products.where((p) {
+          final haystack = TextNormalizer.normalize('${p.name} ${p.brand} ${MockCategories.byId(p.categoryId).name}');
+          return tokens.every(haystack.contains);
+        }).toList();
+      }
+    }
+
+    return products;
   }
 
-  /// Preferred brands first, then within budget, then by Chốt Hời score.
   int _rank(Product a, Product b, SearchIntent intent) {
     int brandRank(Product p) => intent.brands.isEmpty || intent.brands.contains(p.brand) ? 0 : 1;
     int budgetRank(Product p) {

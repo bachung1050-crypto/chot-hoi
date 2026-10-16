@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/auth/login_screen.dart';
+import '../features/auth/reset_password_screen.dart';
 import '../features/cart/deal_cart_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/image_search/image_analyzing_screen.dart';
@@ -17,6 +19,7 @@ import '../features/saved/saved_screen.dart';
 import '../features/search/ai_search_screen.dart';
 import '../features/search/filter_screen.dart';
 import '../features/search/search_results_screen.dart';
+import '../repositories/repository_providers.dart';
 import 'app_shell.dart';
 
 abstract final class AppRoutes {
@@ -35,6 +38,8 @@ abstract final class AppRoutes {
   static const String imageAnalyzing = '/image-search/analyzing';
   static const String imageResult = '/image-search/result';
   static const String imageDeal = '/image-search/deal';
+  static const String login = '/login';
+  static const String resetPassword = '/reset-password';
 
   static String product(String id) => '/product/$id';
 }
@@ -156,9 +161,24 @@ final routerProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: rootKey,
         pageBuilder: (context, state) => _fadeSlidePage(state, const ImageDealScreen()),
       ),
+      GoRoute(
+        path: AppRoutes.login,
+        parentNavigatorKey: rootKey,
+        pageBuilder: (context, state) => _fadeSlidePage(state, const LoginScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.resetPassword,
+        parentNavigatorKey: rootKey,
+        pageBuilder: (context, state) => _fadeSlidePage(state, const ResetPasswordScreen()),
+      ),
     ],
   );
 
+  final recovery = ref
+      .read(authRepositoryProvider)
+      .passwordRecoveryEvents()
+      .listen((_) => router.push(AppRoutes.resetPassword));
+  ref.onDispose(recovery.cancel);
   ref.onDispose(router.dispose);
   return router;
 });

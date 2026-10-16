@@ -15,7 +15,10 @@ import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/loading_skeleton.dart';
 import '../../mock/mock_categories.dart';
 import '../../models/price_alert.dart';
+import '../auth/auth_guard.dart';
+import '../auth/providers/auth_providers.dart';
 import 'providers/profile_providers.dart';
+import 'widgets/price_alert_sheet.dart';
 
 class PriceAlertsScreen extends ConsumerWidget {
   const PriceAlertsScreen({super.key});
@@ -24,6 +27,7 @@ class PriceAlertsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final alerts = ref.watch(priceAlertsProvider);
     final items = alerts.value ?? const <PriceAlert>[];
+    final signedIn = ref.watch(isSignedInProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -31,33 +35,46 @@ class PriceAlertsScreen extends ConsumerWidget {
           children: [
             AppHeader(title: 'Cảnh báo giá (${items.length})'),
             Expanded(
-              child: alerts.when(
-                skipLoadingOnRefresh: true,
-                loading: () => const Padding(padding: AppSpacing.screenPadding, child: ProductListSkeleton()),
-                error: (error, _) =>
-                    ErrorState(message: error.toString(), onRetry: () => ref.invalidate(priceAlertsProvider)),
-                data: (items) => items.isEmpty
-                    ? const EmptyState(
-                        icon: Icons.notifications_off_outlined,
-                        title: 'Chưa có cảnh báo giá',
-                        message: 'Đặt giá mục tiêu để được báo khi sản phẩm giảm giá.',
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(
-                          AppSpacing.screen,
-                          AppSpacing.xs,
-                          AppSpacing.screen,
-                          AppSpacing.lg,
-                        ),
-                        itemCount: items.length,
-                        separatorBuilder: (_, _) => AppSpacing.gapMd,
-                        itemBuilder: (context, index) => _AlertTile(
-                          alert: items[index],
-                          onChanged: (enabled) =>
-                              ref.read(priceAlertsProvider.notifier).setEnabled(items[index].id, enabled: enabled),
-                        ),
-                      ),
-              ),
+              child: !signedIn
+                  ? const LoginRequiredState(
+                      icon: Icons.notifications_off_outlined,
+                      title: 'Đăng nhập để theo dõi giá',
+                      message: 'Cảnh báo giá được lưu theo tài khoản của bạn.',
+                    )
+                  : alerts.when(
+                      skipLoadingOnRefresh: true,
+                      loading: () => const Padding(padding: AppSpacing.screenPadding, child: ProductListSkeleton()),
+                      error: (error, _) =>
+                          ErrorState(message: error.toString(), onRetry: () => ref.invalidate(priceAlertsProvider)),
+                      data: (items) => items.isEmpty
+                          ? const EmptyState(
+                              icon: Icons.notifications_off_outlined,
+                              title: 'Chưa có cảnh báo giá',
+                              message: 'Đặt giá mục tiêu để được báo khi sản phẩm giảm giá.',
+                            )
+                          : ListView.separated(
+                              padding: const EdgeInsets.fromLTRB(
+                                AppSpacing.screen,
+                                AppSpacing.xs,
+                                AppSpacing.screen,
+                                AppSpacing.lg,
+                              ),
+                              itemCount: items.length,
+                              separatorBuilder: (_, _) => AppSpacing.gapMd,
+                              itemBuilder: (context, index) => _AlertTile(
+                                alert: items[index],
+                                onTap: () =>
+                                    showPriceAlertSheet(context, ref, items[index].product, showProductLink: true),
+                                onChanged: (enabled) => runUserAction(
+                                  context,
+                                  ref,
+                                  () => ref
+                                      .read(priceAlertsProvider.notifier)
+                                      .setEnabled(items[index].id, enabled: enabled),
+                                ),
+                              ),
+                            ),
+                    ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.screen, AppSpacing.sm, AppSpacing.screen, AppSpacing.md),
@@ -66,7 +83,7 @@ class PriceAlertsScreen extends ConsumerWidget {
                 child: FilledButton.icon(
                   onPressed: () => AppSnackbar.show(
                     context,
-                    'Mở một sản phẩm và bấm Lưu để theo dõi giá',
+                    'Mở một sản phẩm và bấm 🔔 để đặt giá mục tiêu',
                     icon: Icons.add_alert_outlined,
                     actionLabel: 'Tìm sản phẩm',
                     onAction: () => context.go(AppRoutes.search),
@@ -84,9 +101,10 @@ class PriceAlertsScreen extends ConsumerWidget {
 }
 
 class _AlertTile extends StatelessWidget {
-  const _AlertTile({required this.alert, required this.onChanged});
+  const _AlertTile({required this.alert, required this.onTap, required this.onChanged});
 
   final PriceAlert alert;
+  final VoidCallback onTap;
   final ValueChanged<bool> onChanged;
 
   @override
@@ -96,7 +114,7 @@ class _AlertTile extends StatelessWidget {
 
     return InkWell(
       borderRadius: AppRadius.brLg,
-      onTap: () => context.push(AppRoutes.product(product.id), extra: 'alert-${product.id}'),
+      onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(AppSpacing.md),
         decoration: BoxDecoration(
@@ -142,8 +160,20 @@ class _AlertTile extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Text('Hiện tại: ${Formatters.price(product.currentPrice)}', style: AppTextStyles.small),
-                  if (alert.isReached) ...[
+                  Text(
+                    'Hiện tại: ${Formatters.price(alert.currentPrice)}'
+                    '${alert.offer == null ? '' : ' · ${alert.offer!.marketplace.name}'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.small,
+                  ),
+                  if (!alert.enabled) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Đã tạm dừng theo dõi',
+                      style: AppTextStyles.caption.copyWith(color: AppColors.textTertiary, fontWeight: FontWeight.w700),
+                    ),
+                  ] else if (alert.isReached) ...[
                     const SizedBox(height: 4),
                     Text(
                       'Đã đạt giá mục tiêu 🎉',

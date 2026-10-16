@@ -3,26 +3,44 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../models/product.dart';
 import '../../../repositories/repository_providers.dart';
 import '../../../repositories/saved_products_repository.dart';
+import '../../auth/providers/auth_providers.dart';
 
 class SavedProductsNotifier extends AsyncNotifier<List<Product>> {
   SavedProductsRepository get _repository => ref.read(savedProductsRepositoryProvider);
 
   List<Product> get _current => state.value ?? const [];
 
+  /// Rebuilds on login/logout; signed-out users have no saved products.
   @override
-  Future<List<Product>> build() => _repository.getSavedProducts();
+  Future<List<Product>> build() async {
+    if (ref.watch(currentUserIdProvider) == null) return const [];
+    return ref.watch(savedProductsRepositoryProvider).getSavedProducts();
+  }
 
   bool isSaved(String productId) => _current.any((p) => p.id == productId);
 
+  /// Optimistic: the UI updates at once and rolls back if the request fails.
   Future<void> addSavedProduct(Product product) async {
     if (isSaved(product.id)) return;
-    state = AsyncData([product, ..._current]);
-    await _repository.saveProduct(product.id);
+    final previous = _current;
+    state = AsyncData([product, ...previous]);
+    try {
+      await _repository.saveProduct(product.id);
+    } catch (_) {
+      state = AsyncData(previous);
+      rethrow;
+    }
   }
 
   Future<void> removeSavedProduct(String productId) async {
-    state = AsyncData(_current.where((p) => p.id != productId).toList());
-    await _repository.removeProduct(productId);
+    final previous = _current;
+    state = AsyncData(previous.where((p) => p.id != productId).toList());
+    try {
+      await _repository.removeProduct(productId);
+    } catch (_) {
+      state = AsyncData(previous);
+      rethrow;
+    }
   }
 
   /// Returns the new saved state.
@@ -36,7 +54,7 @@ class SavedProductsNotifier extends AsyncNotifier<List<Product>> {
   }
 
   Future<void> refresh() async {
-    state = await AsyncValue.guard(_repository.getSavedProducts);
+    state = await AsyncValue.guard(build);
   }
 }
 

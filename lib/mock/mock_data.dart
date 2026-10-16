@@ -14,7 +14,8 @@ abstract final class MockData {
     name: 'Nguyễn Văn A',
     email: 'nguyenvana@gmail.com',
     avatarUrl: MockImages.avatar,
-    searchCount: 28,
+    phone: '0901234567',
+    language: 'vi',
   );
 
   static const List<String> savedProductIds = [

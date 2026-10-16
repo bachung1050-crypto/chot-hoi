@@ -1,0 +1,14 @@
+# Minimal Supabase project config for Edge Functions.
+# Schema migrations live under supabase/migrations (applied via `supabase db push`).
+#
+# Project URL (from env.json, not committed with secrets):
+#   https://waqwyegneuhmhlnjwjnd.supabase.co
+
+[functions.ai-search]
+verify_jwt = true
+
+[functions.ai-recommend]
+verify_jwt = true
+
+[functions.ai-review-summary]
+verify_jwt = true

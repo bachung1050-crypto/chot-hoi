@@ -15,6 +15,8 @@ import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/loading_skeleton.dart';
 import '../../models/deal_cart_item.dart';
 import '../../models/marketplace.dart';
+import '../auth/auth_guard.dart';
+import '../auth/providers/auth_providers.dart';
 import 'providers/deal_cart_provider.dart';
 import 'widgets/deal_cart_item_card.dart';
 
@@ -37,18 +39,28 @@ class DealCartScreen extends ConsumerWidget {
         ],
       ),
     );
-    if (confirmed ?? false) await ref.read(dealCartProvider.notifier).clear();
+    if ((confirmed ?? false) && context.mounted) {
+      await runUserAction(context, ref, () => ref.read(dealCartProvider.notifier).clear());
+    }
   }
 
-  void _remove(BuildContext context, WidgetRef ref, DealCartItem item) {
+  Future<void> _remove(BuildContext context, WidgetRef ref, DealCartItem item) async {
     final notifier = ref.read(dealCartProvider.notifier);
-    notifier.removeFromCart(item.id);
+    final removed = await runUserAction(context, ref, () async {
+      await notifier.removeFromCart(item.id);
+      return true;
+    });
+    if (removed == null || !context.mounted) return;
     AppSnackbar.show(
       context,
       'Đã xóa ${item.product.name} khỏi Giỏ hời',
       icon: Icons.delete_outline_rounded,
       actionLabel: 'Hoàn tác',
-      onAction: () => notifier.addToCart(item.product, offer: item.offer),
+      onAction: () => runUserAction(
+        context,
+        ref,
+        () => notifier.addToCart(item.product, offer: item.offer, quantity: item.quantity),
+      ),
     );
   }
 
@@ -128,73 +140,90 @@ class DealCartScreen extends ConsumerWidget {
               ],
             ),
             Expanded(
-              child: cart.when(
-                skipLoadingOnRefresh: true,
-                loading: () => const Padding(padding: EdgeInsets.all(AppSpacing.screen), child: ProductListSkeleton()),
-                error: (error, _) =>
-                    ErrorState(message: error.toString(), onRetry: () => ref.invalidate(dealCartProvider)),
-                data: (items) => RefreshIndicator(
-                  color: AppColors.primary,
-                  onRefresh: ref.read(dealCartProvider.notifier).refresh,
-                  child: items.isEmpty
-                      ? ListView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          children: [
-                            SizedBox(
-                              height: 420,
-                              child: EmptyState(
-                                icon: Icons.shopping_cart_outlined,
-                                title: 'Giỏ hời đang trống',
-                                message: 'Thêm sản phẩm từ trang chi tiết để so sánh và chốt deal.',
-                                actionLabel: 'Khám phá deal',
-                                onAction: () => context.go(AppRoutes.home),
-                              ),
-                            ),
-                          ],
-                        )
-                      : ListView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.screen,
-                            AppSpacing.xs,
-                            AppSpacing.screen,
-                            AppSpacing.lg,
-                          ),
-                          children: [
-                            for (final item in items)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                                child: DealCartItemCard(
-                                  item: item,
-                                  onQuantityChanged: (q) =>
-                                      ref.read(dealCartProvider.notifier).updateQuantity(item.id, q),
-                                  onRemove: () => _remove(context, ref, item),
-                                  onBuy: () => _buy(context, item),
-                                ),
-                              ),
-                            if (summary.aiSaving > 0)
-                              AiInsightCard(
-                                title: '${AppStrings.aiName} gợi ý',
-                                icon: Icons.lightbulb_outline_rounded,
-                                trailing: const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 20),
-                                child: Text.rich(
-                                  TextSpan(
-                                    style: AppTextStyles.body,
-                                    children: [
-                                      const TextSpan(text: 'Bạn có thể tiết kiệm khoảng '),
-                                      TextSpan(
-                                        text: Formatters.price(summary.aiSaving),
-                                        style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w800),
-                                      ),
-                                      const TextSpan(text: ' nếu mua theo đề xuất này so với sàn đắt nhất.'),
-                                    ],
+              child: !ref.watch(isSignedInProvider)
+                  ? const LoginRequiredState(
+                      icon: Icons.shopping_cart_outlined,
+                      title: 'Đăng nhập để dùng Giỏ hời',
+                      message: 'Giỏ hời được lưu theo tài khoản để bạn so sánh và chốt deal trên mọi thiết bị.',
+                    )
+                  : cart.when(
+                      skipLoadingOnRefresh: true,
+                      loading: () =>
+                          const Padding(padding: EdgeInsets.all(AppSpacing.screen), child: ProductListSkeleton()),
+                      error: (error, _) =>
+                          ErrorState(message: error.toString(), onRetry: () => ref.invalidate(dealCartProvider)),
+                      data: (items) => RefreshIndicator(
+                        color: AppColors.primary,
+                        onRefresh: ref.read(dealCartProvider.notifier).refresh,
+                        child: items.isEmpty
+                            ? ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                children: [
+                                  SizedBox(
+                                    height: 420,
+                                    child: EmptyState(
+                                      icon: Icons.shopping_cart_outlined,
+                                      title: 'Giỏ hời đang trống',
+                                      message: 'Thêm sản phẩm từ trang chi tiết để so sánh và chốt deal.',
+                                      actionLabel: 'Khám phá deal',
+                                      onAction: () => context.go(AppRoutes.home),
+                                    ),
                                   ),
+                                ],
+                              )
+                            : ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: const EdgeInsets.fromLTRB(
+                                  AppSpacing.screen,
+                                  AppSpacing.xs,
+                                  AppSpacing.screen,
+                                  AppSpacing.lg,
                                 ),
+                                children: [
+                                  for (final item in items)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                                      child: DealCartItemCard(
+                                        item: item,
+                                        onQuantityChanged: (q) => runUserAction(
+                                          context,
+                                          ref,
+                                          () => ref.read(dealCartProvider.notifier).updateQuantity(item.id, q),
+                                        ),
+                                        onRemove: () => _remove(context, ref, item),
+                                        onBuy: () => _buy(context, item),
+                                      ),
+                                    ),
+                                  if (summary.aiSaving > 0)
+                                    AiInsightCard(
+                                      title: '${AppStrings.aiName} gợi ý',
+                                      icon: Icons.lightbulb_outline_rounded,
+                                      trailing: const Icon(
+                                        Icons.check_circle_rounded,
+                                        color: AppColors.success,
+                                        size: 20,
+                                      ),
+                                      child: Text.rich(
+                                        TextSpan(
+                                          style: AppTextStyles.body,
+                                          children: [
+                                            const TextSpan(text: 'Bạn có thể tiết kiệm khoảng '),
+                                            TextSpan(
+                                              text: Formatters.price(summary.aiSaving),
+                                              style: const TextStyle(
+                                                color: AppColors.primary,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                            const TextSpan(text: ' nếu mua theo đề xuất này so với sàn đắt nhất.'),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
-                          ],
-                        ),
-                ),
-              ),
+                      ),
+                    ),
             ),
             if (items.isNotEmpty)
               Container(

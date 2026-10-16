@@ -4,7 +4,8 @@ class UserProfile {
     required this.name,
     required this.email,
     required this.avatarUrl,
-    required this.searchCount,
+    this.phone,
+    this.language,
     this.isPremium = false,
   });
 
@@ -12,11 +13,24 @@ class UserProfile {
   final String name;
   final String email;
   final String avatarUrl;
-  final int searchCount;
+  final String? phone;
+
+  /// e.g. `vi`, `en`.
+  final String? language;
   final bool isPremium;
 
   String get initials {
     final last = name.trim().split(RegExp(r'\s+')).last;
     return last.isEmpty ? '?' : last.substring(0, 1).toUpperCase();
   }
+
+  UserProfile copyWith({String? name, String? phone, String? language}) => UserProfile(
+    id: id,
+    name: name ?? this.name,
+    email: email,
+    avatarUrl: avatarUrl,
+    phone: phone ?? this.phone,
+    language: language ?? this.language,
+    isPremium: isPremium,
+  );
 }

@@ -12,6 +12,7 @@ class QuickFilterChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.onLongPress,
     this.icon,
     this.selectedFill,
   });
@@ -19,6 +20,7 @@ class QuickFilterChip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final IconData? icon;
   final Color? selectedFill;
 
@@ -34,6 +36,7 @@ class QuickFilterChip extends StatelessWidget {
       child: InkWell(
         customBorder: const StadiumBorder(),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           child: Row(

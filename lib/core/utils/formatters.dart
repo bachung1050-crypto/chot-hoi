@@ -44,4 +44,14 @@ abstract final class Formatters {
   }
 
   static String dayMonth(DateTime date) => DateFormat('dd/MM').format(date);
+
+  /// "Vừa xong", "6 phút trước", "2 giờ trước", "3 ngày trước", then "dd/MM".
+  static String timeAgo(DateTime date, {DateTime? now}) {
+    final diff = (now ?? DateTime.now()).difference(date.toLocal());
+    if (diff.inMinutes < 1) return 'Vừa xong';
+    if (diff.inHours < 1) return '${diff.inMinutes} phút trước';
+    if (diff.inDays < 1) return '${diff.inHours} giờ trước';
+    if (diff.inDays < 7) return '${diff.inDays} ngày trước';
+    return dayMonth(date.toLocal());
+  }
 }

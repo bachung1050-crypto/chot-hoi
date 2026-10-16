@@ -7,6 +7,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/constants/app_text_styles.dart';
+import '../../core/utils/app_snackbar.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/widgets/ai_search_bar.dart';
 import '../../core/widgets/app_header.dart';
@@ -14,9 +15,11 @@ import '../../core/widgets/chot_hoi_mascot.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/product_horizontal_card.dart';
 import '../../models/product_filter.dart';
-import '../profile/providers/profile_providers.dart';
+import '../auth/auth_guard.dart';
+import '../auth/providers/auth_providers.dart';
 import 'filter_screen.dart';
 import 'providers/ai_search_controller.dart';
+import 'providers/search_history_provider.dart';
 import 'widgets/filter_chips.dart';
 import 'widgets/result_summary_card.dart';
 import 'widgets/search_steps.dart';
@@ -145,7 +148,39 @@ class _IdleView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final suggestions = ref.watch(aiSuggestionsProvider).value ?? const [];
-    final history = ref.watch(searchHistoryProvider).value ?? const [];
+    final history = ref.watch(recentSearchQueriesProvider);
+    final signedIn = ref.watch(isSignedInProvider);
+
+    Future<void> deleteQuery(String query) async {
+      final done = await runUserAction(context, ref, () async {
+        await ref.read(searchHistoryProvider.notifier).deleteQuery(query);
+        return true;
+      });
+      if (done != null && context.mounted) {
+        AppSnackbar.show(context, 'Đã xóa "$query" khỏi lịch sử', icon: Icons.history_rounded);
+      }
+    }
+
+    Future<void> clearHistory() async {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Xóa lịch sử tìm kiếm?'),
+          content: const Text('Toàn bộ tìm kiếm gần đây của bạn sẽ bị xóa.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Hủy')),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+              child: const Text('Xóa hết'),
+            ),
+          ],
+        ),
+      );
+      if ((confirmed ?? false) && context.mounted) {
+        await runUserAction(context, ref, () => ref.read(searchHistoryProvider.notifier).clear());
+      }
+    }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(AppSpacing.screen, AppSpacing.sm, AppSpacing.screen, AppSpacing.xl),
@@ -182,14 +217,37 @@ class _IdleView extends ConsumerWidget {
           ),
         if (history.isNotEmpty) ...[
           AppSpacing.gapLg,
-          Text('Tìm kiếm gần đây', style: AppTextStyles.h3),
+          Row(
+            children: [
+              Expanded(child: Text('Tìm kiếm gần đây', style: AppTextStyles.h3)),
+              TextButton(onPressed: clearHistory, child: const Text('Xóa tất cả')),
+            ],
+          ),
           AppSpacing.gapSm,
           Wrap(
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.sm,
             children: [
               for (final item in history)
-                QuickFilterChip(label: item, icon: Icons.history_rounded, selected: false, onTap: () => onSearch(item)),
+                QuickFilterChip(
+                  label: item,
+                  icon: Icons.history_rounded,
+                  selected: false,
+                  onTap: () => onSearch(item),
+                  onLongPress: () => deleteQuery(item),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('Nhấn giữ một mục để xóa khỏi lịch sử', style: AppTextStyles.caption),
+        ] else if (!signedIn) ...[
+          AppSpacing.gapLg,
+          Row(
+            children: [
+              const Icon(Icons.history_rounded, size: 18, color: AppColors.textTertiary),
+              const SizedBox(width: 6),
+              Expanded(child: Text('Đăng nhập để lưu lịch sử tìm kiếm', style: AppTextStyles.small)),
+              TextButton(onPressed: () => context.push(AppRoutes.login), child: const Text('Đăng nhập')),
             ],
           ),
         ],
@@ -213,7 +271,11 @@ class _ConversationView extends ConsumerWidget {
     final header = <Widget>[
       UserQueryBubble(query: state.query),
       AppSpacing.gapLg,
-      SearchSteps(completedSteps: state.completedSteps, isLoading: state.status == AiSearchStatus.loading),
+      SearchSteps(
+        completedSteps: state.completedSteps,
+        isLoading: state.status == AiSearchStatus.loading,
+        labels: state.stepLabels,
+      ),
     ];
 
     if (state.status == AiSearchStatus.loading) {
@@ -236,6 +298,10 @@ class _ConversationView extends ConsumerWidget {
         padding: AppSpacing.screenPadding,
         children: [
           ...header,
+          if (state.agentMessage != null && state.agentMessage!.isNotEmpty) ...[
+            AppSpacing.gapMd,
+            _AgentReplyCard(message: state.agentMessage!, actionRequired: state.actionRequired),
+          ],
           AppSpacing.gapLg,
           const EmptyState(
             icon: Icons.search_off_rounded,
@@ -252,13 +318,28 @@ class _ConversationView extends ConsumerWidget {
     final brandChips = intent.brands.isNotEmpty
         ? intent.brands
         : state.allProducts.map((p) => p.brand).toSet().take(2).toList();
+    final hasProducts = state.allProducts.isNotEmpty;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(AppSpacing.screen, 0, AppSpacing.screen, AppSpacing.lg),
       children: [
         ...header,
+        if (state.agentMessage != null && state.agentMessage!.isNotEmpty) ...[
+          AppSpacing.gapSm,
+          _AgentReplyCard(message: state.agentMessage!, actionRequired: state.actionRequired),
+        ],
+        if (!hasProducts) ...[
+          if (state.agentMessage == null || state.agentMessage!.isEmpty) ...[
+            AppSpacing.gapLg,
+            const EmptyState(
+              icon: Icons.search_off_rounded,
+              title: 'Chưa tìm thấy sản phẩm phù hợp',
+              message: 'Thử mô tả khác, ví dụ: "tai nghe chống ồn dưới 10 triệu".',
+            ),
+          ],
+        ] else ...[
         AppSpacing.gapSm,
-        ResultSummaryCard(intent: intent, count: state.allProducts.length),
+        ResultSummaryCard(intent: intent, count: state.allProducts.length, best: state.bestRecommendation),
         AppSpacing.gapMd,
         Row(
           children: [
@@ -322,7 +403,55 @@ class _ConversationView extends ConsumerWidget {
                 rank: state.filter.sort == ProductSort.recommended && i < 3 ? i + 1 : null,
               ),
             ),
+        ],
       ],
+    );
+  }
+}
+
+/// Compact agent reply — same conversation layout, no redesign.
+class _AgentReplyCard extends StatelessWidget {
+  const _AgentReplyCard({required this.message, this.actionRequired});
+
+  final String message;
+  final String? actionRequired;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.aiBubble,
+        borderRadius: AppRadius.brLg,
+        border: Border.all(color: AppColors.ai.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '✦ ${AppStrings.aiName}',
+            style: AppTextStyles.label.copyWith(color: AppColors.ai, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          Text(message, style: AppTextStyles.body.copyWith(height: 1.45)),
+          if (actionRequired != null && actionRequired!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              actionRequired!,
+              style: AppTextStyles.small.copyWith(color: AppColors.warning, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () => context.push(AppRoutes.login),
+                child: const Text('Đăng nhập'),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

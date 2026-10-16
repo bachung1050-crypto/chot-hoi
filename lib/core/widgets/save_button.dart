@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/auth/auth_guard.dart';
 import '../../features/saved/providers/saved_products_provider.dart';
 import '../../models/product.dart';
 import '../constants/app_colors.dart';
@@ -26,8 +27,12 @@ class SaveButton extends ConsumerWidget {
     final saved = ref.watch(isProductSavedProvider(product.id));
 
     Future<void> toggle() async {
-      final nowSaved = await ref.read(savedProductsProvider.notifier).toggle(product);
-      if (!context.mounted) return;
+      final nowSaved = await runUserAction(
+        context,
+        ref,
+        () => ref.read(savedProductsProvider.notifier).toggle(product),
+      );
+      if (nowSaved == null || !context.mounted) return;
       final callback = onToggled;
       if (callback != null) {
         callback(nowSaved);

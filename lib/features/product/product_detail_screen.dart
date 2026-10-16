@@ -18,9 +18,13 @@ import '../../core/widgets/save_button.dart';
 import '../../mock/mock_categories.dart';
 import '../../models/marketplace.dart';
 import '../../models/product.dart';
+import '../auth/auth_guard.dart';
 import '../cart/providers/deal_cart_provider.dart';
+import '../profile/providers/profile_providers.dart';
+import '../profile/widgets/price_alert_sheet.dart';
 import '../saved/providers/saved_products_provider.dart';
 import 'providers/product_providers.dart';
+import 'providers/product_review_summary_provider.dart';
 import 'widgets/ai_review_card.dart';
 import 'widgets/price_history_chart.dart';
 
@@ -89,20 +93,29 @@ class _ProductDetailView extends ConsumerWidget {
   final Product product;
   final String heroTag;
 
-  void _openMarketplace(BuildContext context, MarketplaceOffer offer) {
+  void _openMarketplace(BuildContext context, WidgetRef ref, MarketplaceOffer offer) {
     AppSnackbar.show(
       context,
       'Bản demo: chuyển tới ${offer.marketplace.name} với giá ${Formatters.price(offer.price)}',
       icon: Icons.open_in_new_rounded,
+      actionLabel: 'Thêm vào giỏ',
+      onAction: () => _addToCart(context, ref, offer: offer),
     );
   }
 
-  Future<void> _addToCart(BuildContext context, WidgetRef ref) async {
-    final added = await ref.read(dealCartProvider.notifier).addToCart(product);
-    if (!context.mounted) return;
+  Future<void> _addToCart(BuildContext context, WidgetRef ref, {MarketplaceOffer? offer}) async {
+    final chosen = offer ?? product.cheapestOffer;
+    final added = await runUserAction(
+      context,
+      ref,
+      () => ref.read(dealCartProvider.notifier).addToCart(product, offer: chosen),
+    );
+    if (added == null || !context.mounted) return;
     AppSnackbar.show(
       context,
-      added ? 'Đã thêm vào Giỏ hời' : 'Sản phẩm đã có trong Giỏ hời',
+      added
+          ? 'Đã thêm vào Giỏ hời (${chosen.marketplace.name})'
+          : 'Sản phẩm trên ${chosen.marketplace.name} đã có trong Giỏ hời',
       icon: Icons.shopping_cart_checkout_rounded,
       actionLabel: 'Xem giỏ',
       onAction: () => context.go(AppRoutes.cart),
@@ -112,6 +125,9 @@ class _ProductDetailView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cheapest = product.cheapestOffer;
+    final reviewSummaryAsync = ref.watch(productReviewSummaryProvider(product.id));
+    final reviewSummary = reviewSummaryAsync.asData?.value;
+    final reviewLoading = reviewSummaryAsync.isLoading;
 
     return Scaffold(
       backgroundColor: AppColors.card,
@@ -130,8 +146,10 @@ class _ProductDetailView extends ConsumerWidget {
                   runSpacing: 4,
                   children: [
                     RatingWidget(rating: product.rating, reviewCount: product.reviewCount, showReviewWord: true),
-                    Container(width: 1, height: 12, color: AppColors.border),
-                    Text('Đã bán ${Formatters.compact(product.soldCount)}+', style: AppTextStyles.small),
+                    if (product.soldCount > 0) ...[
+                      Container(width: 1, height: 12, color: AppColors.border),
+                      Text('Đã bán ${Formatters.compact(product.soldCount)}+', style: AppTextStyles.small),
+                    ],
                   ],
                 ),
                 AppSpacing.gapSm,
@@ -151,7 +169,7 @@ class _ProductDetailView extends ConsumerWidget {
                   ],
                 ),
                 AppSpacing.gapLg,
-                AiReviewCard(product: product),
+                AiReviewCard(product: product, reviewSummary: reviewSummary, loading: reviewLoading),
                 AppSpacing.gapXl,
                 _Section(
                   title: 'So sánh giá giữa các sàn',
@@ -161,7 +179,7 @@ class _ProductDetailView extends ConsumerWidget {
                         MarketplacePriceCard(
                           offer: offer,
                           cheapestPrice: cheapest.price,
-                          onTap: () => _openMarketplace(context, offer),
+                          onTap: () => _openMarketplace(context, ref, offer),
                         ),
                     ],
                   ),
@@ -171,7 +189,7 @@ class _ProductDetailView extends ConsumerWidget {
                 AppSpacing.gapXl,
                 _Section(
                   title: 'Ưu & nhược điểm',
-                  child: ProsConsCard(product: product),
+                  child: ProsConsCard(product: product, reviewSummary: reviewSummary),
                 ),
                 AppSpacing.gapXl,
                 _Section(
@@ -195,23 +213,23 @@ class _ProductDetailView extends ConsumerWidget {
       bottomNavigationBar: _ActionBar(
         product: product,
         onAddToCart: () => _addToCart(context, ref),
-        onBuy: () => _openMarketplace(context, cheapest),
+        onBuy: () => _openMarketplace(context, ref, cheapest),
       ),
     );
   }
 }
 
-class _Gallery extends StatefulWidget {
+class _Gallery extends ConsumerStatefulWidget {
   const _Gallery({required this.product, required this.heroTag});
 
   final Product product;
   final String heroTag;
 
   @override
-  State<_Gallery> createState() => _GalleryState();
+  ConsumerState<_Gallery> createState() => _GalleryState();
 }
 
-class _GalleryState extends State<_Gallery> {
+class _GalleryState extends ConsumerState<_Gallery> {
   int _page = 0;
 
   Future<void> _share(BuildContext context) async {
@@ -226,6 +244,7 @@ class _GalleryState extends State<_Gallery> {
     final images = product.galleryUrls.isEmpty ? [product.imageUrl] : product.galleryUrls;
     final icon = AppIcons.category(MockCategories.byId(product.categoryId).iconKey);
     final topInset = MediaQuery.paddingOf(context).top;
+    final hasAlert = ref.watch(priceAlertsProvider).value?.any((a) => a.product.id == product.id) ?? false;
 
     return ColoredBox(
       color: AppColors.card,
@@ -273,6 +292,12 @@ class _GalleryState extends State<_Gallery> {
                   SaveButton(product: product, size: 20),
                   AppSpacing.gapSm,
                   _RoundIconButton(icon: Icons.share_outlined, tooltip: 'Chia sẻ', onTap: () => _share(context)),
+                  AppSpacing.gapSm,
+                  _RoundIconButton(
+                    icon: hasAlert ? Icons.notifications_active_rounded : Icons.notifications_none_rounded,
+                    tooltip: 'Báo khi giảm giá',
+                    onTap: () => showPriceAlertSheet(context, ref, product),
+                  ),
                 ],
               ),
             ),
@@ -407,8 +432,12 @@ class _ActionBar extends ConsumerWidget {
     final saved = ref.watch(isProductSavedProvider(product.id));
 
     Future<void> toggleSave() async {
-      final nowSaved = await ref.read(savedProductsProvider.notifier).toggle(product);
-      if (!context.mounted) return;
+      final nowSaved = await runUserAction(
+        context,
+        ref,
+        () => ref.read(savedProductsProvider.notifier).toggle(product),
+      );
+      if (nowSaved == null || !context.mounted) return;
       AppSnackbar.show(
         context,
         nowSaved ? 'Đã lưu sản phẩm' : 'Đã bỏ lưu sản phẩm',

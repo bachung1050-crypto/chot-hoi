@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import '../core/utils/product_specs.dart';
 import 'deal_verdict.dart';
 import 'marketplace.dart';
 import 'price_history.dart';
@@ -37,6 +38,8 @@ class Product {
     required this.cons,
     required this.offers,
     required this.priceHistory,
+    this.reviewAiScore,
+    this.specs = const {},
   });
 
   final String id;
@@ -72,6 +75,9 @@ class Product {
 
   /// Purpose tags such as `code`, `gaming`, `office`.
   final List<String> useCases;
+
+  /// Raw `products.specs` JSONB (empty when absent).
+  final Map<String, dynamic> specs;
   final String aiSummary;
   final List<String> aiHighlights;
   final List<String> pros;
@@ -80,6 +86,12 @@ class Product {
 
   /// Daily prices, oldest first.
   final List<PriceHistoryPoint> priceHistory;
+
+  /// Optional `review_summaries.ai_score` (null when no summary row).
+  final int? reviewAiScore;
+
+  /// Parsed RAM GB from [specs] only (`specs.ram`). Null = missing data.
+  int? get ramGb => ProductSpecs.ramGb(specs);
 
   DealVerdict get verdict => DealVerdict.fromScore(chotHoiScore);
 

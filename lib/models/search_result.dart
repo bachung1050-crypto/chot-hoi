@@ -1,27 +1,21 @@
 import 'product.dart';
+import 'product_recommendation.dart';
+import 'search_intent.dart';
 
-/// What Chốt Hời AI understood from a natural-language query.
-class SearchIntent {
-  const SearchIntent({
-    required this.query,
-    this.categoryId,
-    this.maxPrice,
-    this.brands = const [],
-    this.purpose,
-    this.dealsOnly = false,
-  });
-
-  final String query;
-  final String? categoryId;
-  final int? maxPrice;
-  final List<String> brands;
-  final String? purpose;
-  final bool dealsOnly;
-}
+export 'search_intent.dart';
 
 class SearchResult {
-  const SearchResult({required this.intent, required this.products});
+  const SearchResult({required this.intent, required this.products, this.recommendations = const []});
 
   final SearchIntent intent;
   final List<Product> products;
+
+  /// Fit ranking for [products] (same order when recommended sort is active).
+  final List<ProductRecommendation> recommendations;
+
+  ProductRecommendation? get bestRecommendation =>
+      recommendations.where((r) => r.isBestChoice).firstOrNull ?? recommendations.firstOrNull;
+
+  ProductRecommendation? recommendationFor(String productId) =>
+      recommendations.where((r) => r.productId == productId).firstOrNull;
 }

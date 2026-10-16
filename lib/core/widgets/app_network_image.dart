@@ -23,6 +23,10 @@ class AppNetworkImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final placeholder = _Placeholder(icon: fallbackIcon, iconSize: iconSize);
+    if (url.isEmpty) {
+      final radius = borderRadius;
+      return radius == null ? placeholder : ClipRRect(borderRadius: radius, child: placeholder);
+    }
     final image = Image.network(
       url,
       fit: fit,

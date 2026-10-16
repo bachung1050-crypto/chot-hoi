@@ -12,6 +12,7 @@ import '../../core/widgets/app_header.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/tap_scale.dart';
 import '../../models/image_search_result.dart';
+import '../auth/auth_guard.dart';
 import '../cart/providers/deal_cart_provider.dart';
 import '../profile/providers/profile_providers.dart';
 import 'providers/image_search_controller.dart';
@@ -22,8 +23,12 @@ class ImageDealScreen extends ConsumerWidget {
   const ImageDealScreen({super.key});
 
   Future<void> _addToCart(BuildContext context, WidgetRef ref, ImageSearchResult result) async {
-    final added = await ref.read(dealCartProvider.notifier).addToCart(result.product);
-    if (!context.mounted) return;
+    final added = await runUserAction(
+      context,
+      ref,
+      () => ref.read(dealCartProvider.notifier).addToCart(result.product),
+    );
+    if (added == null || !context.mounted) return;
     AppSnackbar.show(
       context,
       added ? 'Đã thêm vào Giỏ hời' : 'Sản phẩm đã có trong Giỏ hời',
@@ -34,8 +39,12 @@ class ImageDealScreen extends ConsumerWidget {
   }
 
   Future<void> _trackPrice(BuildContext context, WidgetRef ref, ImageSearchResult result) async {
-    final alert = await ref.read(priceAlertsProvider.notifier).trackPrice(result.product);
-    if (!context.mounted) return;
+    final alert = await runUserAction(
+      context,
+      ref,
+      () => ref.read(priceAlertsProvider.notifier).trackPrice(result.product),
+    );
+    if (alert == null || !context.mounted) return;
     AppSnackbar.show(
       context,
       'Sẽ báo khi giá về ${Formatters.price(alert.targetPrice)}',

@@ -9,6 +9,8 @@ import '../../core/constants/app_text_styles.dart';
 import '../../core/widgets/app_header.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../models/app_notification.dart';
+import '../auth/auth_guard.dart';
+import '../auth/providers/auth_providers.dart';
 import '../search/widgets/filter_chips.dart';
 import 'providers/profile_providers.dart';
 
@@ -22,18 +24,58 @@ class NotificationsScreen extends ConsumerStatefulWidget {
 class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   String? _group;
 
+  void _open(AppNotification notification) {
+    if (!notification.isRead) {
+      runUserAction(context, ref, () => ref.read(notificationsProvider.notifier).markAsRead(notification.id));
+    }
+    final productId = notification.productId;
+    if (productId != null) context.push(AppRoutes.product(productId));
+  }
+
   @override
   Widget build(BuildContext context) {
     final notifications = ref.watch(notificationsProvider);
     final all = notifications.value ?? const <AppNotification>[];
     final groups = {for (final type in NotificationType.values) type.groupLabel}.toList();
     final visible = _group == null ? all : all.where((n) => n.type.groupLabel == _group).toList();
+    final signedIn = ref.watch(isSignedInProvider);
+    final unread = ref.watch(unreadNotificationCountProvider);
+
+    if (!signedIn) {
+      return const Scaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              AppHeader(title: 'Thông báo'),
+              Expanded(
+                child: LoginRequiredState(
+                  icon: Icons.notifications_none_rounded,
+                  title: 'Đăng nhập để xem thông báo',
+                  message: 'Thông báo về giá và deal được gửi theo tài khoản của bạn.',
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            const AppHeader(title: 'Thông báo'),
+            AppHeader(
+              title: 'Thông báo',
+              actions: [
+                if (unread > 0)
+                  IconButton(
+                    tooltip: 'Đánh dấu tất cả đã đọc',
+                    onPressed: () =>
+                        runUserAction(context, ref, () => ref.read(notificationsProvider.notifier).markAllAsRead()),
+                    icon: const Icon(Icons.done_all_rounded, color: AppColors.text),
+                  ),
+              ],
+            ),
             SizedBox(
               height: 38,
               child: ListView(
@@ -59,21 +101,36 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
             AppSpacing.gapMd,
             Expanded(
               child: notifications.when(
+                skipLoadingOnRefresh: true,
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (error, _) =>
                     ErrorState(message: error.toString(), onRetry: () => ref.invalidate(notificationsProvider)),
-                data: (_) => visible.isEmpty
-                    ? const EmptyState(
-                        icon: Icons.notifications_none_rounded,
-                        title: 'Không có thông báo',
-                        message: 'Thông báo về giá và deal mới sẽ xuất hiện ở đây.',
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(AppSpacing.screen, 0, AppSpacing.screen, AppSpacing.lg),
-                        itemCount: visible.length,
-                        separatorBuilder: (_, _) => AppSpacing.gapSm,
-                        itemBuilder: (context, index) => _NotificationTile(notification: visible[index]),
-                      ),
+                data: (_) => RefreshIndicator(
+                  color: AppColors.primary,
+                  onRefresh: ref.read(notificationsProvider.notifier).refresh,
+                  child: visible.isEmpty
+                      ? ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: const [
+                            SizedBox(
+                              height: 420,
+                              child: EmptyState(
+                                icon: Icons.notifications_none_rounded,
+                                title: 'Không có thông báo',
+                                message: 'Thông báo về giá và deal mới sẽ xuất hiện ở đây.',
+                              ),
+                            ),
+                          ],
+                        )
+                      : ListView.separated(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(AppSpacing.screen, 0, AppSpacing.screen, AppSpacing.lg),
+                          itemCount: visible.length,
+                          separatorBuilder: (_, _) => AppSpacing.gapSm,
+                          itemBuilder: (context, index) =>
+                              _NotificationTile(notification: visible[index], onTap: () => _open(visible[index])),
+                        ),
+                ),
               ),
             ),
           ],
@@ -84,9 +141,10 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
 }
 
 class _NotificationTile extends StatelessWidget {
-  const _NotificationTile({required this.notification});
+  const _NotificationTile({required this.notification, required this.onTap});
 
   final AppNotification notification;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -96,8 +154,6 @@ class _NotificationTile extends StatelessWidget {
       NotificationType.restock => (Icons.inventory_2_rounded, AppColors.success, AppColors.successLight),
       NotificationType.system => (Icons.auto_awesome_rounded, AppColors.ai, AppColors.aiLight),
     };
-    final productId = notification.productId;
-
     return Material(
       color: notification.isRead ? AppColors.card : AppColors.primaryLight.withValues(alpha: 0.45),
       shape: const RoundedRectangleBorder(
@@ -106,7 +162,7 @@ class _NotificationTile extends StatelessWidget {
       ),
       child: InkWell(
         borderRadius: AppRadius.brLg,
-        onTap: productId == null ? null : () => context.push(AppRoutes.product(productId)),
+        onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Row(

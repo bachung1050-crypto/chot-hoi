@@ -40,21 +40,30 @@ class UserQueryBubble extends StatelessWidget {
 
 /// Progress list "Đang phân tích yêu cầu..." with green check marks.
 class SearchSteps extends StatelessWidget {
-  const SearchSteps({super.key, required this.completedSteps, required this.isLoading});
+  const SearchSteps({
+    super.key,
+    required this.completedSteps,
+    required this.isLoading,
+    this.labels,
+  });
 
   final int completedSteps;
   final bool isLoading;
 
+  /// Optional override (agent tool status). Defaults to [AppStrings.searchSteps].
+  final List<String>? labels;
+
   @override
   Widget build(BuildContext context) {
+    final steps = labels ?? AppStrings.searchSteps;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var i = 0; i < AppStrings.searchSteps.length; i++)
+        for (var i = 0; i < steps.length; i++)
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.md),
             child: _StepRow(
-              label: AppStrings.searchSteps[i],
+              label: steps[i],
               state: i < completedSteps || !isLoading
                   ? _StepState.done
                   : i == completedSteps

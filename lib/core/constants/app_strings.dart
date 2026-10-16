@@ -16,6 +16,15 @@ abstract final class AppStrings {
     'Đang tổng hợp kết quả...',
   ];
 
+  /// Agent loading labels (same layout as [searchSteps]).
+  static const List<String> agentLoadingSteps = [
+    'Đang tìm...',
+    'Đang so giá...',
+    'Đang kiểm tra đánh giá...',
+    'Đang kiểm tra lịch sử giá...',
+    'Đang phân tích...',
+  ];
+
   static const String imageSearchTitle = 'TÌM BẰNG HÌNH ẢNH';
   static const String imageSearchSubtitle = 'Chụp hoặc tải ảnh sản phẩm';
   static const List<String> imageSearchFlow = ['AI sẽ nhận diện', 'tìm sản phẩm', 'so sánh giá', 'đánh giá deal'];
